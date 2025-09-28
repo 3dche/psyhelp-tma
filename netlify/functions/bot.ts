@@ -21,7 +21,6 @@ export const handler: Handler = async (event) => {
 
   const update = JSON.parse(event.body || "{}");
 
-  // Сообщения
   const msg = update.message || update.edited_message;
   if (msg?.chat?.id) {
     const chatId = msg.chat.id;
@@ -45,16 +44,14 @@ export const handler: Handler = async (event) => {
       const data = await r.json().catch(() => ({}));
       await sendMessage(chatId, data?.link ? `Ссылка на оплату: ${data.link}` : "Не смог создать счёт.");
     } else {
-      await sendMessage(chatId, "Напиши /start чтобы открыть мини-приложение.");
+      await sendMessage(chatId, "Напиши /start, чтобы открыть мини-приложение.");
     }
   }
 
-  // Нажатия на inline-кнопки
   const cq = update.callback_query;
   if (cq?.id && cq.data === "pay") {
     const r = await fetch("https://psyhelp-tma.netlify.app/api/stars-create-link?a=30");
     const data = await r.json().catch(() => ({}));
-    // Откроет ссылку прямо из кнопки
     await tg("answerCallbackQuery", { callback_query_id: cq.id, url: data?.link });
   }
 
