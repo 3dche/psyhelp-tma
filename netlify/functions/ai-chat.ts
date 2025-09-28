@@ -1,59 +1,76 @@
+// netlify/functions/ai-chat.ts
 import type { Handler } from "@netlify/functions";
 
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 export const handler: Handler = async (event) => {
-  // Функция принимает только POST
+  if (event.httpMethod === "OPTIONS") {
+    return { statusCode: 204, headers: CORS, body: "" };
+  }
   if (event.httpMethod !== "POST") {
-    return { statusCode: 405, body: "Method Not Allowed" };
+    return { statusCode: 405, headers: CORS, body: "Method Not Allowed" };
   }
 
   try {
-    const apiKey = process.env.OPENAI_API_KEY;        // ключ берём из Netlify env
-    const body = JSON.parse(event.body || "{}");
-    const messages = Array.isArray(body.messages) ? body.messages : [];
-
-    if (messages.length === 0) {
-      return { statusCode: 400, body: JSON.stringify({ error: "messages[] required" }) };
+    const { message } = JSON.parse(event.body || "{}");
+    if (!message) {
+      return { statusCode: 400, headers: CORS, body: "No message" };
     }
 
-    // Если ключа нет — не падаем, просто отвечаем эхом (чтобы фронт «жил»)
+    const apiKey = process.env.OPENAI_API_KEY || "";
     if (!apiKey) {
-      const last = messages[messages.length - 1]?.content ?? "";
-      return { statusCode: 200, body: JSON.stringify({ text: `Эхо: ${last}` }) };
+      return { statusCode: 500, headers: CORS, body: "Missing OPENAI_API_KEY" };
     }
 
-    // Минимальный запрос к OpenAI (chat.completions)
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+        model: "gpt-4o",          // GPT-4-класс. Если нет доступа — попробуй "gpt-4.1-mini" или "gpt-4o-mini"
+        temperature: 0.7,
+        max_tokens: 500,
         messages: [
           {
             role: "system",
             content:
-              "Ты бережный психолог-поддержка. Отвечай коротко, эмпатично и без медицинских диагнозов.",
+              "Ты эмпатичный психолог-консультант. Отвечай кратко, тепло, по делу, избегай медицинских диагнозов. Предлагай простые практики и мягкие вопросы.",
           },
-          ...messages,
+          { role: "user", content: message },
         ],
-        temperature: 0.6,
-        max_tokens: 250,
       }),
     });
 
-    const data = await r.json();
     if (!r.ok) {
+      const t = await r.text();
       return {
         statusCode: r.status,
-        body: JSON.stringify({ error: data?.error?.message || "OpenAI error" }),
+        headers: CORS,
+        body: `Upstream error: ${t}`,
       };
     }
 
-    const text = data?.choices?.[0]?.message?.content ?? "";
-    return { statusCode: 200, body: JSON.stringify({ text }) };
+    const data = await r.json();
+    const reply =
+      data?.choices?.[0]?.message?.content ??
+      "Извини, сейчас не получилось ответить.";
+
+    return {
+      statusCode: 200,
+      headers: { ...CORS, "Content-Type": "application/json" },
+      body: JSON.stringify({ reply }),
+    };
   } catch (e: any) {
-    return { statusCode: 500, body: JSON.stringify({ error: e?.message || "Server error" }) };
+    return {
+      statusCode: 500,
+      headers: CORS,
+      body: `Server error: ${e?.message || e}`,
+    };
   }
 };
