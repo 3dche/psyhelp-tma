@@ -1,76 +1,71 @@
-// netlify/functions/ai-chat.ts
 import type { Handler } from "@netlify/functions";
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+const API_URL = "https://openrouter.ai/api/v1/chat/completions";
+const MODEL = process.env.OPENROUTER_MODEL ?? "openai/gpt-4o-mini";
+const SITE_URL = process.env.SITE_URL ?? process.env.URL ?? "https://psyhelp-tma.netlify.app";
+const APP_TITLE = "PsyHelp Mini";
+
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type",
+  };
+}
+
+function buildMessages(userMessage: string, history: any[] = []) {
+  const system = {
+    role: "system",
+    content:
+      "Ты — эмпатичный ИИ-психолог. Отвечай коротко (2–5 предложений), поддерживай, задавай один мягкий уточняющий вопрос. " +
+      "Не ставь диагнозов и не давай медицинских советов. При угрозе жизни советуй немедленно обратиться в экстренные службы.",
+  };
+  const msgs = [system, ...history, { role: "user", content: userMessage ?? "" }];
+  return msgs;
+}
 
 export const handler: Handler = async (event) => {
-  if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: CORS, body: "" };
-  }
   if (event.httpMethod !== "POST") {
-    return { statusCode: 405, headers: CORS, body: "Method Not Allowed" };
+    return { statusCode: 405, headers: corsHeaders(), body: "Method Not Allowed" };
+  }
+
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) {
+    return { statusCode: 500, headers: corsHeaders(), body: "Missing OPENROUTER_API_KEY" };
   }
 
   try {
-    const { message } = JSON.parse(event.body || "{}");
-    if (!message) {
-      return { statusCode: 400, headers: CORS, body: "No message" };
-    }
+    const { message, history } = JSON.parse(event.body ?? "{}");
+    const messages = buildMessages(message, history);
 
-    const apiKey = process.env.OPENAI_API_KEY || "";
-    if (!apiKey) {
-      return { statusCode: 500, headers: CORS, body: "Missing OPENAI_API_KEY" };
-    }
-
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    const r = await fetch(API_URL, {
       method: "POST",
       headers: {
+        Authorization: `Bearer ${key}`,
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        // OpenRouter рекомендует эти заголовки:
+        "HTTP-Referer": SITE_URL,
+        "X-Title": APP_TITLE,
       },
       body: JSON.stringify({
-        model: "gpt-4o",          // GPT-4-класс. Если нет доступа — попробуй "gpt-4.1-mini" или "gpt-4o-mini"
+        model: MODEL,
+        messages,
         temperature: 0.7,
         max_tokens: 500,
-        messages: [
-          {
-            role: "system",
-            content:
-              "Ты эмпатичный психолог-консультант. Отвечай кратко, тепло, по делу, избегай медицинских диагнозов. Предлагай простые практики и мягкие вопросы.",
-          },
-          { role: "user", content: message },
-        ],
       }),
     });
 
+    const data = await r.json();
     if (!r.ok) {
-      const t = await r.text();
-      return {
-        statusCode: r.status,
-        headers: CORS,
-        body: `Upstream error: ${t}`,
-      };
+      console.error("OpenRouter error", data);
+      return { statusCode: r.status, headers: corsHeaders(), body: JSON.stringify({ error: data }) };
     }
 
-    const data = await r.json();
-    const reply =
-      data?.choices?.[0]?.message?.content ??
-      "Извини, сейчас не получилось ответить.";
-
-    return {
-      statusCode: 200,
-      headers: { ...CORS, "Content-Type": "application/json" },
-      body: JSON.stringify({ reply }),
-    };
+    const text = data.choices?.[0]?.message?.content ?? "Извини, сейчас не получилось ответить.";
+    return { statusCode: 200, headers: corsHeaders(), body: JSON.stringify({ reply: text }) };
   } catch (e: any) {
-    return {
-      statusCode: 500,
-      headers: CORS,
-      body: `Server error: ${e?.message || e}`,
-    };
+    console.error(e);
+    return { statusCode: 500, headers: corsHeaders(), body: JSON.stringify({ error: e.message ?? "Server error" }) };
   }
 };
+
+export default handler;
