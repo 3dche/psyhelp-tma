@@ -1,4 +1,4 @@
-import type { Handler } from "@netlify/functions/ai-chat.ts";
+import type { Handler } from "@ai-chat.ts";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 
