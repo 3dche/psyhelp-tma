@@ -11,23 +11,42 @@ const SYSTEM_PROMPT = `
 `;
 
 export const handler: Handler = async (event) => {
-  if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
-  if (!OPENAI_API_KEY) return { statusCode: 500, body: "Missing OPENAI_API_KEY" };
+  try {
+    if (event.httpMethod !== "POST") {
+      return { statusCode: 405, body: "Method Not Allowed" };
+    }
+    if (!OPENAI_API_KEY) {
+      console.error("Missing OPENAI_API_KEY");
+      return { statusCode: 500, body: JSON.stringify({ error: "NO_API_KEY" }) };
+    }
 
-  const { messages = [] } = JSON.parse(event.body || "{}");
+    const { messages = [] } = JSON.parse(event.body || "{}");
 
-  const r = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_API_KEY}` },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      temperature: 0.7,
-      messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
-    }),
-  });
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        temperature: 0.7,
+        messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
+      }),
+    });
 
-  const data = await r.json();
-  const text = data?.choices?.[0]?.message?.content ?? "Извини, сейчас не получилось ответить.";
+    if (!r.ok) {
+      const err = await r.text();
+      console.error("OpenAI error:", r.status, err);
+      return { statusCode: 502, body: JSON.stringify({ error: "OPENAI_ERROR", status: r.status }) };
+    }
 
-  return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) };
+    const data = await r.json();
+    const text = data?.choices?.[0]?.message?.content ?? "Извини, сейчас не получилось ответить.";
+
+    return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) };
+  } catch (e: any) {
+    console.error("ai-chat exception:", e?.message || e);
+    return { statusCode: 500, body: JSON.stringify({ error: "SERVER_ERROR" }) };
+  }
 };
